@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 #include <optional>
+#include <lmcons.h>
 
 std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find) {
 	HDEVINFO info = SetupDiGetClassDevsW(hid_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -21,7 +22,7 @@ std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_
 		PSP_DEVICE_INTERFACE_DETAIL_DATA_A device_detail_data = (PSP_DEVICE_INTERFACE_DETAIL_DATA_A)malloc(required_size);
 		// check for null malloc
 		if (device_detail_data == NULL) {
-			std::cout << "null malloc" << std::endl;
+			debug_log << "null malloc" << std::endl;
 			exit(1);
 		}
 		else {
@@ -80,7 +81,7 @@ void enable_wireless_notifications(HANDLE receiver) {
 	// https://lekensteyn.nl/files/logitech/logitech_hidpp10_specification_for_Unifying_Receivers.pdf
 	const std::vector<unsigned char> enable_notifications_cmd = {0x10, 0xff, 0x80, 0x00, 0x00, 0x01, 0x00};
 	if (!write_receiver(receiver, enable_notifications_cmd)) {
-		std::cout << "warning: failed to enable notifications on receiver error: " << GetLastError() << std::endl;
+		debug_log << "warning: failed to enable notifications on receiver error: " << GetLastError() << std::endl;
 	}
 	else {
 		std::vector<unsigned char> response_buffer(7);	
@@ -89,7 +90,7 @@ void enable_wireless_notifications(HANDLE receiver) {
 			// If the response isn't the expected response for enable success,
 			// print a warning message
 			if (!(response_buffer[0] == 0x10 && response_buffer[1] == 0xff && response_buffer[2] == 0x80 && response_buffer[3] == 0x00)) {
-				std::cout << "warning: failed to confirm wireless notifications are enabled" << std::endl;
+				debug_log << "warning: failed to confirm wireless notifications are enabled" << std::endl;
 			}
 		}
 	}
@@ -115,7 +116,7 @@ std::string get_device_name(HANDLE receiver, HANDLE long_responder, unsigned cha
 		return name;
 	}
 	else {
-		std::cout << "warning: failed to find name for device: " << (unsigned int)device_id << std::endl;
+		debug_log << "warning: failed to find name for device: " << (unsigned int)device_id << std::endl;
 		return "unknown_name";
 	}
 }
@@ -179,8 +180,8 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 			// break out of the loop if there's an error
 			// should only happen when the receiver is unplugged
 			DWORD error = GetLastError();
-			if (error != 1167) {
-				std::cout << "failed to read receiver with error: " << GetLastError() << std::endl;
+			if (error != ERROR_DEVICE_NOT_CONNECTED) {
+				debug_log << "failed to read receiver with error: " << GetLastError() << std::endl;
 			}
 			break;
 		}
@@ -190,14 +191,52 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 }
 
 void process_device_status(unsigned int device_id){
-	std::cout << device_id << ": " << devices_info[device_id].name << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
+	debug_log << device_id << ": " << devices_info[device_id].name << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
 }
 
 int main() {
-	// keep looping indefinitely,
-	// handles the case of the receiver being unplugged and plugged back in
-	while (true) {
-		find_and_wait_on_receiver();
-		read_notifications(process_device_status);
+	// Setup config.ini and debug.log in appdata
+	DWORD username_length = UNLEN + 1;
+	char username[UNLEN + 1];
+	GetUserNameA(username, &username_length);
+	std::string appdata_path("C:\\Users\\" + std::string(username) + "\\AppData\\Local\\logitech-unify-mqtt");
+	if (CreateDirectoryA(appdata_path.c_str(), NULL) || ERROR_ALREADY_EXISTS == GetLastError()) {
+		std::string config_path = appdata_path + "\\config.ini";
+		std::string log_path = appdata_path + "\\debug.log";
+		HANDLE config_file = CreateFileA(config_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (GetLastError() != ERROR_ALREADY_EXISTS) {
+			WritePrivateProfileStringA("MQTT", "ip", "", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "port", "1883", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "username", "", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "password", "", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "prefix","homeassistant", config_path.c_str());
+		}
+		CloseHandle(config_file);
+		std::vector<char> config_buffer(64);
+		GetPrivateProfileStringA("MQTT","ip",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		std::string mqtt_ip(reinterpret_cast<char*>(config_buffer.data()));
+		GetPrivateProfileStringA("MQTT","port","1883", config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		std::string mqtt_port(reinterpret_cast<char*>(config_buffer.data()));
+		GetPrivateProfileStringA("MQTT","username",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		std::string mqtt_username(reinterpret_cast<char*>(config_buffer.data()));
+		GetPrivateProfileStringA("MQTT","password",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		std::string mqtt_password(reinterpret_cast<char*>(config_buffer.data()));
+		GetPrivateProfileStringA("MQTT","prefix",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		std::string mqtt_prefix(reinterpret_cast<char*>(config_buffer.data()));
+
+		debug_log.open(log_path, std::ios::app);
+
+		// Run the driver
+		// Keep looping indefinitely,
+		// handles the case of the receiver being unplugged and plugged back in
+		while (true) {
+			find_and_wait_on_receiver();
+			read_notifications(process_device_status);
+		}	
+		debug_log.close();
+	}
+	else {
+		std::cout << "failed to create appdata path" << std::endl;
+		exit(1);
 	}
 }

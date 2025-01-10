@@ -132,7 +132,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="unify_status.cpp" />
+    <ClCompile Include="src\unify_status.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
@@ -140,10 +140,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="main.h" />
-    <ClInclude Include="unify_status.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="hid notes.txt" />
+    <ClInclude Include="src\unify_status.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

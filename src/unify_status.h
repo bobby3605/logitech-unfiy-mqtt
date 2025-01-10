@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <chrono>
+#include <fstream>
 
 struct HIDDevicePath {
 	char vid[9];
@@ -42,3 +43,5 @@ struct DeviceData{
 
 // receiver supports a maximum of 6 devices
 std::vector<DeviceData> devices_info(6);
+
+std::ofstream debug_log;
