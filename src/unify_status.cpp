@@ -194,7 +194,7 @@ void process_device_status(unsigned int device_id){
 	debug_log << device_id << ": " << devices_info[device_id].name << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
 }
 
-int main() {
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
 	// Setup config.ini and debug.log in appdata
 	DWORD username_length = UNLEN + 1;
 	char username[UNLEN + 1];
