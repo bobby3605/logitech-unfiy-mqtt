@@ -52,6 +52,7 @@ class UnifyStatus {
 
 	std::ofstream debug_log;
 
+	std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find);
 	void find_and_wait_on_receiver();
 	bool read_receiver(HANDLE receiver, std::vector<unsigned char>& buffer, LPDWORD bytes_read = NULL);
 	bool write_receiver(HANDLE receiver, std::vector<unsigned char> const& buffer);
@@ -65,7 +66,6 @@ public:
 	~UnifyStatus();
 	bool quit = false;
 	void run();
-	std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find);
 	std::vector<DeviceData> devices_info;
 	const std::map<DeviceStatus, std::string> status_to_string{ {CONNECTED, "connected"}, {DISCONNECTED, "disconnected"}, {POWERSAVE, "powersave"} };
 };

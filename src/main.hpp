@@ -8,5 +8,10 @@
 HMENU hPopMenu;
 
 HINSTANCE instance;
+NOTIFYICONDATAA nid{};
 
 UnifyStatus* driver;
+
+bool stop_thread = false;
+
+HANDLE driver_win_thread;

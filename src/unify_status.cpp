@@ -51,10 +51,7 @@ void UnifyStatus::find_and_wait_on_receiver() {
 	GUID hid_guid;
 	HidD_GetHidGuid(&hid_guid);
 	// wait until receiver is found
-	while (true) {
-		if (quit) {
-			break;
-		}
+	while (!quit) {
 		std::optional<std::string> primary_path = find_hid_path(&hid_guid, unify_hid_primary);
 		if (primary_path.has_value()) {
 			unify_primary_path = primary_path.value();
@@ -137,10 +134,7 @@ void UnifyStatus::read_notifications() {
 	for (auto& device : devices_info) {
 		device.last_connected_packet_time = start_time;
 	}
-	while (true) {
-		if (quit) {
-			break;
-		}
+	while (!quit) {
 		// keep reading the device until it has an error
 		if (read_receiver(receiver, read_buffer, &bytes_read)) {
 			// get the time the packet was received
@@ -186,12 +180,12 @@ void UnifyStatus::read_notifications() {
 		}
 		else {
 			// break out of the loop if there's an error
-			// should only happen when the receiver is unplugged
+			// ignore device loss or aborted operations
 			DWORD error = GetLastError();
-			if (error != ERROR_DEVICE_NOT_CONNECTED) {
+			if (!(error == ERROR_DEVICE_NOT_CONNECTED || error == ERROR_OPERATION_ABORTED)) {
 				debug_log << "failed to read receiver with error: " << GetLastError() << std::endl;
+				break;
 			}
-			break;
 		}
 	}
 	CloseHandle(receiver);
@@ -206,14 +200,10 @@ void UnifyStatus::run() {
 	// Run the driver
 	// Keep looping indefinitely,
 	// handles the case of the receiver being unplugged and plugged back in
-	while (true) {
-		if (quit) {
-			break;
-		}
+	while (!quit) {
 		find_and_wait_on_receiver();
 		read_notifications();
 	}	
-	debug_log.close();
 }
 
 UnifyStatus::UnifyStatus() {

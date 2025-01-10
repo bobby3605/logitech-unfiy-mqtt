@@ -24,7 +24,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 						title = driver->devices_info[i].name + " - " + driver->status_to_string.at(driver->devices_info[i].status);
 						info.dwTypeData = (LPSTR)title.c_str();
 						info.cch = title.length();
-						InsertMenuItemA(popup, ID_RELOAD, FALSE, &info);
+						InsertMenuItemA(popup, i, TRUE, &info);
 					}
 				}
 				TrackPopupMenu(popup,TPM_LEFTALIGN|TPM_LEFTBUTTON|TPM_BOTTOMALIGN,lpClickPoint.x, lpClickPoint.y,0,hWnd,NULL);
@@ -35,10 +35,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 		case WM_COMMAND:
 			wmId    = LOWORD(wParam);
 			wmEvent = HIWORD(wParam);
-			switch (LOWORD(wmId)) {
+			switch (wmId) {
+				case ID_RELOAD:
+					// driver will exit,
+					// then the thread loop will set quit to false,
+					// then run the driver again
+					driver->quit = true;
+					CancelSynchronousIo(driver_win_thread);
+					break;
+				case ID_EXIT:
+					Shell_NotifyIconA(NIM_DELETE, &nid);
+					DestroyWindow(hWnd);
+					break;
 				default:
 					return DefWindowProc(hWnd, uMsg, wParam, lParam);
 			}
+			break;
 		case WM_DESTROY:
 			PostQuitMessage(0);
 			break;
@@ -50,8 +62,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam){
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
 	instance = hInstance;
-	driver = new UnifyStatus();
-	std::thread driver_thread([&]() {driver->run();});
+	std::thread driver_thread([&]() {
+		// Get the windows handle of the driver thread,
+		// this allows the main thread to cancel pending io operations
+		DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &driver_win_thread, NULL, FALSE, DUPLICATE_CLOSE_SOURCE | DUPLICATE_SAME_ACCESS);
+		while (!stop_thread) {
+			driver = new UnifyStatus();
+			driver->run();
+			delete driver;
+		}
+		});
 
 	const std::string tooltip = "Logitech Unify MQTT";
 	WNDCLASSA wc{};
@@ -64,7 +84,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 	hWnd = CreateWindowA(tooltip.c_str(), tooltip.c_str(), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 300, CW_USEDEFAULT, 0, NULL, NULL, hInstance, NULL);
 	HICON icon = LoadIconA(hInstance, (LPCSTR)MAKEINTRESOURCEA(IDI_ICON1));
 
-	NOTIFYICONDATAA nid{};
 	nid.cbSize = sizeof(NOTIFYICONDATAA);
 	nid.hWnd = hWnd;
 	nid.uID = 0;
@@ -82,9 +101,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 		std::this_thread::sleep_for(std::chrono::milliseconds(100));
 	}
 	
+	stop_thread = true;
 	driver->quit = true;
+	// cancel any pending reads
+	CancelSynchronousIo(driver_win_thread);
 	driver_thread.join();
-	delete driver;
 	DestroyIcon(icon);
 	DestroyWindow(hWnd);
 	UnregisterClassA(tooltip.c_str(), hInstance);
