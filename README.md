@@ -13,4 +13,4 @@ Currently, it only displays the status to the console.
 
 ### TODO:
 MQTT integration\
-Conversion to a service, or maybe a task tray application\
+Conversion to a service, or maybe a task tray application
