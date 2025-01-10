@@ -132,6 +132,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\unify_status.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -139,8 +140,15 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="main.h" />
-    <ClInclude Include="src\unify_status.h" />
+    <ClInclude Include="resource.h" />
+    <ClInclude Include="src\main.hpp" />
+    <ClInclude Include="src\unify_status.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="logitech-unify-mqtt.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="icon1.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

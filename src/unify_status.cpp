@@ -1,14 +1,14 @@
-#include <windows.h>
-#include <hidsdi.h>
-#include <setupapi.h>
 #include <iostream>
-#include "unify_status.h"
+#include "unify_status.hpp"
 #include <thread>
 #include <vector>
+#include <algorithm>
 #include <optional>
+#include <hidsdi.h>
+#include <setupapi.h>
 #include <lmcons.h>
 
-std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find) {
+std::optional<std::string> UnifyStatus::find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find) {
 	HDEVINFO info = SetupDiGetClassDevsW(hid_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 	SP_DEVICE_INTERFACE_DATA device_data;
 	device_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
@@ -47,11 +47,14 @@ std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_
 	}
 }
 
-void find_and_wait_on_receiver() {
+void UnifyStatus::find_and_wait_on_receiver() {
 	GUID hid_guid;
 	HidD_GetHidGuid(&hid_guid);
 	// wait until receiver is found
 	while (true) {
+		if (quit) {
+			break;
+		}
 		std::optional<std::string> primary_path = find_hid_path(&hid_guid, unify_hid_primary);
 		if (primary_path.has_value()) {
 			unify_primary_path = primary_path.value();
@@ -68,15 +71,15 @@ void find_and_wait_on_receiver() {
 	}
 }
 
-bool read_receiver(HANDLE receiver, std::vector<unsigned char>& buffer, LPDWORD bytes_read = NULL){
+bool UnifyStatus::read_receiver(HANDLE receiver, std::vector<unsigned char>& buffer, LPDWORD bytes_read){
 	return ReadFile(receiver, buffer.data(), buffer.capacity(), bytes_read, NULL);
 } 
-bool write_receiver(HANDLE receiver, std::vector<unsigned char> const& buffer){
+bool UnifyStatus::write_receiver(HANDLE receiver, std::vector<unsigned char> const& buffer){
 	return WriteFile(receiver, buffer.data(), buffer.capacity(), NULL, NULL);
 }
 
 
-void enable_wireless_notifications(HANDLE receiver) {
+void UnifyStatus::enable_wireless_notifications(HANDLE receiver) {
 	// Ensure wireless notifications are enabled by writing to 0x00 register
 	// https://lekensteyn.nl/files/logitech/logitech_hidpp10_specification_for_Unifying_Receivers.pdf
 	const std::vector<unsigned char> enable_notifications_cmd = {0x10, 0xff, 0x80, 0x00, 0x00, 0x01, 0x00};
@@ -98,7 +101,7 @@ void enable_wireless_notifications(HANDLE receiver) {
 
 // NOTE:
 // device_id should be zero indexed
-std::string get_device_name(HANDLE receiver, HANDLE long_responder, unsigned char device_id){
+std::string UnifyStatus::get_device_name(HANDLE receiver, HANDLE long_responder, unsigned int device_id){
 	// get name command needs the 7th bit set in a 0 indexed device id
 	unsigned char correct_id = device_id | 0x40;
 	const std::vector<unsigned char> get_name_cmd = {0x10, 0xff, 0x83, 0xb5, correct_id, 0x00, 0x00};
@@ -121,7 +124,8 @@ std::string get_device_name(HANDLE receiver, HANDLE long_responder, unsigned cha
 	}
 }
 
-void read_notifications(void (*callback)(unsigned int device_id)) {
+
+void UnifyStatus::read_notifications() {
 	HANDLE receiver = CreateFileA(unify_primary_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	HANDLE long_responder = CreateFileA(unify_long_responder_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	enable_wireless_notifications(receiver);
@@ -134,6 +138,9 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 		device.last_connected_packet_time = start_time;
 	}
 	while (true) {
+		if (quit) {
+			break;
+		}
 		// keep reading the device until it has an error
 		if (read_receiver(receiver, read_buffer, &bytes_read)) {
 			// get the time the packet was received
@@ -144,14 +151,15 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 				if (read_buffer[0] == 0x10 && read_buffer[2] == 0x41) {
 					// devices are 1 indexed on the receiver,
 					// convert the device id to be 0 indexed
-					read_buffer[1] -= 1;
-					DeviceData* device_info = &devices_info[read_buffer[1]];
+					unsigned int device_id = read_buffer[1] - 1;
+					DeviceData* device_info = &devices_info[device_id];
 					// 0xa1 is device connection
 					if (read_buffer[4] == 0xa1) {
 						device_info->last_connected_packet_time = std::chrono::steady_clock::now();
 						device_info->status = CONNECTED;
-						// Get the device name when it connects
-						device_info->name = get_device_name(receiver, long_responder, read_buffer[1]);
+						device_info->name = get_device_name(receiver, long_responder, device_id);
+						std::replace(device_info->name.begin(), device_info->name.end(), ' ', '_');
+						device_info->name = mqtt_prefix + device_info->name;
 					}
 					// 0x61 is device disconnection
 					else if (read_buffer[4] == 0x61) {
@@ -169,10 +177,10 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 						}
 					}	
 					// NOTE:
-					// callback will run twice in the case of a power save
+					// process_device_status will run twice in the case of a power save
 					// first for the connected status,
 					// then again for the powersave status
-					callback(read_buffer[1]);
+					process_device_status(device_id);
 				}
 			}
 		}
@@ -190,11 +198,26 @@ void read_notifications(void (*callback)(unsigned int device_id)) {
 	CloseHandle(long_responder);
 }
 
-void process_device_status(unsigned int device_id){
+void UnifyStatus::process_device_status(unsigned int device_id){
 	debug_log << device_id << ": " << devices_info[device_id].name << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
 }
 
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
+void UnifyStatus::run() {
+	// Run the driver
+	// Keep looping indefinitely,
+	// handles the case of the receiver being unplugged and plugged back in
+	while (true) {
+		if (quit) {
+			break;
+		}
+		find_and_wait_on_receiver();
+		read_notifications();
+	}	
+	debug_log.close();
+}
+
+UnifyStatus::UnifyStatus() {
+	devices_info.resize(6);
 	// Setup config.ini and debug.log in appdata
 	DWORD username_length = UNLEN + 1;
 	char username[UNLEN + 1];
@@ -209,34 +232,27 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 			WritePrivateProfileStringA("MQTT", "port", "1883", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "username", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "password", "", config_path.c_str());
-			WritePrivateProfileStringA("MQTT", "prefix","homeassistant", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "prefix","homeassistant/", config_path.c_str());
 		}
 		CloseHandle(config_file);
 		std::vector<char> config_buffer(64);
 		GetPrivateProfileStringA("MQTT","ip",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		std::string mqtt_ip(reinterpret_cast<char*>(config_buffer.data()));
+		mqtt_ip = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","port","1883", config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		std::string mqtt_port(reinterpret_cast<char*>(config_buffer.data()));
+		mqtt_port = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","username",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		std::string mqtt_username(reinterpret_cast<char*>(config_buffer.data()));
+		mqtt_username = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","password",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		std::string mqtt_password(reinterpret_cast<char*>(config_buffer.data()));
+		mqtt_password = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","prefix",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		std::string mqtt_prefix(reinterpret_cast<char*>(config_buffer.data()));
-
+		mqtt_prefix = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		debug_log.open(log_path, std::ios::app);
-
-		// Run the driver
-		// Keep looping indefinitely,
-		// handles the case of the receiver being unplugged and plugged back in
-		while (true) {
-			find_and_wait_on_receiver();
-			read_notifications(process_device_status);
-		}	
-		debug_log.close();
 	}
 	else {
 		std::cout << "failed to create appdata path" << std::endl;
-		exit(1);
 	}
+}
+
+UnifyStatus::~UnifyStatus() {
+	debug_log.close();
 }
