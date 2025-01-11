@@ -8,7 +8,25 @@
 #include <setupapi.h>
 #include <lmcons.h>
 
-std::optional<std::string> UnifyStatus::find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find) {
+void UnifyStatus::print_bytes(std::vector<unsigned char> const& bytes) {
+	for (const auto& byte : bytes) {
+		debug_log << std::hex << (int)byte << " ";
+	}
+}
+bool UnifyStatus::check_response(HANDLE usb, std::vector<unsigned char> const& bytes_to_check, std::vector<unsigned char>& response) {
+		read_usb(usb, response);
+		for (int i = 0; i < bytes_to_check.size(); ++i) {
+			if (response[i] != bytes_to_check[i]) {
+				break;
+			}
+			if (i == bytes_to_check.size() - 1) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+std::string UnifyStatus::find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find) {
 	HDEVINFO info = SetupDiGetClassDevsW(hid_guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
 	SP_DEVICE_INTERFACE_DATA device_data;
 	device_data.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
@@ -45,6 +63,7 @@ std::optional<std::string> UnifyStatus::find_hid_path(LPGUID hid_guid, HIDDevice
 			free(device_detail_data);
 		}
 	}
+	return "";
 }
 
 void UnifyStatus::find_and_wait_on_receiver() {
@@ -52,80 +71,111 @@ void UnifyStatus::find_and_wait_on_receiver() {
 	HidD_GetHidGuid(&hid_guid);
 	// wait until receiver is found
 	while (!quit) {
-		std::optional<std::string> primary_path = find_hid_path(&hid_guid, unify_hid_primary);
-		if (primary_path.has_value()) {
-			unify_primary_path = primary_path.value();
-			std::optional<std::string> long_responder_path = find_hid_path(&hid_guid, unify_hid_long_responder);
-			if (long_responder_path.has_value()) {
-				unify_long_responder_path = long_responder_path.value();
-				break;
-			}
+		unify_primary_path = find_hid_path(&hid_guid, unify_hid_primary);
+		unify_responder_path = find_hid_path(&hid_guid, unify_hid_responder);
+		if (unify_primary_path != "" && unify_responder_path != "") {
+			break;
 		}
-		else {
-			// check for receiver every second
-			std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		}
+		// check for receiver every second
+		// debug log runs if either path check fails
+		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+		debug_log << "waiting on receiver" << std::endl;
 	}
 }
 
-bool UnifyStatus::read_receiver(HANDLE receiver, std::vector<unsigned char>& buffer, LPDWORD bytes_read){
-	return ReadFile(receiver, buffer.data(), buffer.capacity(), bytes_read, NULL);
+bool UnifyStatus::read_usb(HANDLE usb, std::vector<unsigned char>& buffer, LPDWORD bytes_read){
+	return ReadFile(usb, buffer.data(), buffer.capacity(), bytes_read, NULL);
 } 
-bool UnifyStatus::write_receiver(HANDLE receiver, std::vector<unsigned char> const& buffer){
-	return WriteFile(receiver, buffer.data(), buffer.capacity(), NULL, NULL);
+bool UnifyStatus::write_usb(HANDLE usb, std::vector<unsigned char> const& buffer){
+	return WriteFile(usb, buffer.data(), buffer.capacity(), NULL, NULL);
 }
 
 
-void UnifyStatus::enable_wireless_notifications(HANDLE receiver) {
+void UnifyStatus::enable_wireless_notifications() {
 	// Ensure wireless notifications are enabled by writing to 0x00 register
 	// https://lekensteyn.nl/files/logitech/logitech_hidpp10_specification_for_Unifying_Receivers.pdf
 	const std::vector<unsigned char> enable_notifications_cmd = {0x10, 0xff, 0x80, 0x00, 0x00, 0x01, 0x00};
-	if (!write_receiver(receiver, enable_notifications_cmd)) {
-		debug_log << "warning: failed to enable notifications on receiver error: " << GetLastError() << std::endl;
+	write_usb(receiver, enable_notifications_cmd);
+	std::vector<unsigned char> response_buffer(7);	
+	// Read and check success response from receiver
+	const std::vector<unsigned char> enable_notifications_success = {0x10, 0xff, 0x80, 0x00};
+	if (!check_response(receiver, enable_notifications_success, response_buffer)) {
+		debug_log << "warning: failed to confirm enabled notifications: ";
+		print_bytes(response_buffer);
+		debug_log << std::endl;
+	}
+	// For some reason, the HID driver sends a notification read command as well,
+	// and so this driver needs to wait for the notification read response
+	const std::vector<unsigned char> notification_read_success = {0x10, 0xff, 0x81, 0x00};
+	if (!check_response(receiver, notification_read_success, response_buffer)) {
+		debug_log << "warning: failed to confirm notification read after enable: ";
+		print_bytes(response_buffer);
+		debug_log << std::endl;
+	}
+}
+
+void UnifyStatus::get_paired_devices() {
+	const std::vector<unsigned char> get_connected_devices_count_cmd = {0x10, 0xff, 0x81, 0x02, 0x00, 0x00, 0x00};
+	write_usb(receiver, get_connected_devices_count_cmd);
+	const std::vector<unsigned char> connected_devices_response_check = {0x10, 0xff, 0x81, 0x02, 0x00};
+	std::vector<unsigned char> response_buffer(7);
+	if (check_response(receiver, connected_devices_response_check, response_buffer)) {
+		unsigned int paired_devices_count = (int)response_buffer[5];
+		devices_info.resize(paired_devices_count);
+		for (int i = 0; i < paired_devices_count; ++i) {
+			devices_info[i].name = get_device_name(i);
+			std::replace(devices_info[i].name.begin(), devices_info[i].name.end(), ' ', '_');
+			devices_info[i].name = mqtt_prefix + devices_info[i].name;
+		}
 	}
 	else {
-		std::vector<unsigned char> response_buffer(7);	
-		// Read and check success response from receiver
-		if (read_receiver(receiver, response_buffer)) {
-			// If the response isn't the expected response for enable success,
-			// print a warning message
-			if (!(response_buffer[0] == 0x10 && response_buffer[1] == 0xff && response_buffer[2] == 0x80 && response_buffer[3] == 0x00)) {
-				debug_log << "warning: failed to confirm wireless notifications are enabled" << std::endl;
-			}
-		}
+		debug_log << "warning: failed to get paired devices: ";
+		print_bytes(response_buffer);
+		debug_log << std::endl;
 	}
 }
 
 // NOTE:
 // device_id should be zero indexed
-std::string UnifyStatus::get_device_name(HANDLE receiver, HANDLE long_responder, unsigned int device_id){
+std::string UnifyStatus::get_device_name(unsigned int device_id){
 	// get name command needs the 7th bit set in a 0 indexed device id
 	unsigned char correct_id = device_id | 0x40;
 	const std::vector<unsigned char> get_name_cmd = {0x10, 0xff, 0x83, 0xb5, correct_id, 0x00, 0x00};
-	write_receiver(receiver, get_name_cmd);
+	write_usb(receiver, get_name_cmd);
+	// For some reason, when the device is connected,
+	// the receiver sends an undocumented packet before sending the name
+	if (devices_info[device_id].status == CONNECTED) {
+		const std::vector<unsigned char> undocumented_response_check = { 0x11, 0x01, 0x04 };
+		std::vector<unsigned char> undocumented_response(20);
+		if (!check_response(responder, undocumented_response_check, undocumented_response)) {
+			debug_log << "warning: failed to read undocumented response: ";
+			print_bytes(undocumented_response);
+			debug_log << std::endl;
+		}
+	}
 	std::vector<unsigned char> name_response_buffer(20);
-	// NOTE:
-	// long_responder responds twice to the get_name_cmd
-	// the first is unknown data, the second contains the name
-	read_receiver(long_responder, name_response_buffer);
-	read_receiver(long_responder, name_response_buffer);
-	if(name_response_buffer[0] == 0x11 && name_response_buffer[1] == 0xff && name_response_buffer[2] == 0x83 && name_response_buffer[3] == 0xb5) {
+	const std::vector<unsigned char> name_response_check = { 0x11, 0xff, 0x83, 0xb5 };
+	if(check_response(responder, name_response_check, name_response_buffer)) {
 		unsigned char name_length = name_response_buffer[5];
 		// device name is from the 6th byte to the length in the 5th byte
 		std::string name(name_response_buffer.begin() + 6, name_response_buffer.begin() + 6 + name_length);
 		return name;
 	}
 	else {
-		debug_log << "warning: failed to find name for device: " << (unsigned int)device_id << std::endl;
-		return "unknown_name";
+		debug_log << "warning: failed to find name for device: " << (unsigned int)device_id << " bytes: ";
+		print_bytes(name_response_buffer);
+		debug_log << std::endl;
+		return "";
 	}
 }
 
 
 void UnifyStatus::read_notifications() {
-	HANDLE receiver = CreateFileA(unify_primary_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	HANDLE long_responder = CreateFileA(unify_long_responder_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-	enable_wireless_notifications(receiver);
+	receiver = CreateFileA(unify_primary_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	responder = CreateFileA(unify_responder_path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	enable_wireless_notifications();
+	std::vector<unsigned char> tmp(1);
+	get_paired_devices();
 	std::vector<unsigned char> read_buffer(notification_byte_size);
 	DWORD bytes_read;
 	// set the start time to 0 to ensure that a first connection isn't an erroneous powersave
@@ -136,7 +186,7 @@ void UnifyStatus::read_notifications() {
 	}
 	while (!quit) {
 		// keep reading the device until it has an error
-		if (read_receiver(receiver, read_buffer, &bytes_read)) {
+		if (read_usb(receiver, read_buffer, &bytes_read)) {
 			// get the time the packet was received
 			std::chrono::steady_clock::time_point current_packet_time = std::chrono::steady_clock::now();
 			// only process if notification_byte_size bytes were read
@@ -144,6 +194,9 @@ void UnifyStatus::read_notifications() {
 				// check if the data is a device connection status notification
 				if (read_buffer[0] == 0x10 && read_buffer[2] == 0x41) {
 					// devices are 1 indexed on the receiver,
+					if (read_buffer[1] > devices_info.size()) {
+						devices_info.resize(read_buffer[1]);
+					}
 					// convert the device id to be 0 indexed
 					unsigned int device_id = read_buffer[1] - 1;
 					DeviceData* device_info = &devices_info[device_id];
@@ -151,9 +204,11 @@ void UnifyStatus::read_notifications() {
 					if (read_buffer[4] == 0xa1) {
 						device_info->last_connected_packet_time = std::chrono::steady_clock::now();
 						device_info->status = CONNECTED;
-						device_info->name = get_device_name(receiver, long_responder, device_id);
-						std::replace(device_info->name.begin(), device_info->name.end(), ' ', '_');
-						device_info->name = mqtt_prefix + device_info->name;
+						if (device_info->name == "") {
+							device_info->name = get_device_name(device_id);
+							std::replace(device_info->name.begin(), device_info->name.end(), ' ', '_');
+							device_info->name = mqtt_prefix + device_info->name;
+						}
 					}
 					// 0x61 is device disconnection
 					else if (read_buffer[4] == 0x61) {
@@ -180,16 +235,16 @@ void UnifyStatus::read_notifications() {
 		}
 		else {
 			// break out of the loop if there's an error
-			// ignore device loss or aborted operations
 			DWORD error = GetLastError();
+			// not connected and aborted are handled error cases
 			if (!(error == ERROR_DEVICE_NOT_CONNECTED || error == ERROR_OPERATION_ABORTED)) {
 				debug_log << "failed to read receiver with error: " << GetLastError() << std::endl;
-				break;
 			}
+			break;
 		}
 	}
 	CloseHandle(receiver);
-	CloseHandle(long_responder);
+	CloseHandle(responder);
 }
 
 void UnifyStatus::process_device_status(unsigned int device_id){
@@ -207,7 +262,6 @@ void UnifyStatus::run() {
 }
 
 UnifyStatus::UnifyStatus() {
-	devices_info.resize(6);
 	// Setup config.ini and debug.log in appdata
 	DWORD username_length = UNLEN + 1;
 	char username[UNLEN + 1];

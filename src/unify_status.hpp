@@ -33,13 +33,15 @@ class UnifyStatus {
 		"vid_046d", "pid_c52b", "mi_02", "col01"
 	};
 
-	const HIDDevicePath unify_hid_long_responder{
+	const HIDDevicePath unify_hid_responder{
 		"vid_046d", "pid_c52b", "mi_02", "col02"
 	};
 
-	std::string unify_primary_path;
-	std::string unify_long_responder_path;
+	std::string unify_primary_path = "";
+	std::string unify_responder_path = "";
 
+	HANDLE receiver;
+	HANDLE responder;
 
 	// Size of wireless device connection status notification
 	const unsigned int notification_byte_size = 7;
@@ -52,14 +54,17 @@ class UnifyStatus {
 
 	std::ofstream debug_log;
 
-	std::optional<std::string> find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find);
+	std::string find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_find);
 	void find_and_wait_on_receiver();
-	bool read_receiver(HANDLE receiver, std::vector<unsigned char>& buffer, LPDWORD bytes_read = NULL);
-	bool write_receiver(HANDLE receiver, std::vector<unsigned char> const& buffer);
-	void enable_wireless_notifications(HANDLE receiver);
-	std::string get_device_name(HANDLE receiver, HANDLE long_responder, unsigned int device_id);
+	void get_paired_devices();
+	bool read_usb(HANDLE handle, std::vector<unsigned char>& buffer, LPDWORD bytes_read = NULL);
+	bool write_usb(HANDLE handle, std::vector<unsigned char> const& buffer);
+	void enable_wireless_notifications();
+	std::string get_device_name(unsigned int device_id);
 	void read_notifications();
 	void process_device_status(unsigned int device_id);
+	void print_bytes(std::vector<unsigned char> const& bytes);
+	bool check_response(HANDLE usb, std::vector<unsigned char> const& bytes_to_check, std::vector<unsigned char>& response);
 
 public:
 	UnifyStatus();
