@@ -8,9 +8,18 @@ It can handle unplugging and plugging back in a unify receiver, along with 6 dev
 It can only handle a single receiver.\
 It will report the name and power state of each device to MQTT when the power state changes.\
 There are 3 power states: disconnected, connected, and power save.\
-Power save occurs when a device turns itself off to save power (k400 plus does this after 5 minutes).\
-Currently, it only displays the status to the console.
+Power save occurs when a device turns itself off to save power (k400 plus does this after 5 minutes).
+
+The status is shown in a task tray icon by right clicking on it.\
+There are 'Reload' and 'Exit' options on the popup menu.\
+The config file and debug logs are stored in C:\Users\username\AppData\Local\logitech-unify-mqtt\
 
 ### TODO:
-MQTT integration\
-Conversion to a service, or maybe a task tray application
+MQTT integration
+
+### Known limitations:
+When the driver starts, if a device is connected, it will display as disconnected.\
+The driver can get the name of the device at the start, but it will show as disconnected.\
+So whenever the driver is started/reloaded, devices will have to be disconnected and re-connected to the receiver in order to get the correct status.\
+The receiver does not have a command (at least not a documented one) that will give the connected/disconnected status of a device.\
+The receiver only sends connection status information when the device connects or disconnects.
