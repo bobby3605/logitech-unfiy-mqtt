@@ -173,7 +173,7 @@ std::string UnifyStatus::get_device_name(unsigned int device_id){
 void UnifyStatus::update_mqtt_discovery() {
 	json payload;
 	payload["dev"] = { {"ids", "logitech-unify-mqtt"}, {"name", "Logitech Unify Receiver"}};
-	payload["o"] = { {"name", "logitech-unify-mqtt"}, {"url", "https://github.com/bobby3605/logitech-unfiy-mqtt"}};
+	payload["o"] = { {"name", "logitech-unify-mqtt"}, {"url", "https://github.com/bobby3605/logitech-unify-mqtt"}};
 	payload["qos"] = 0;
 	payload["cmps"] = json::object();
 	for (int i = 0; i < devices_info.size(); ++i) {
