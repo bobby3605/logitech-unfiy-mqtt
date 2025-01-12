@@ -21,7 +21,8 @@ env:
   BUILD_CONFIGURATION: Release
 
 permissions:
-  contents: read
+  contents: write
+  discussions: write
 
 jobs:
   build:
@@ -52,3 +53,9 @@ jobs:
       with:
         name: logitech-unify-mqtt.exe
         path: D:\a\logitech-unfiy-mqtt\logitech-unfiy-mqtt\x64\Release\logitech-unify-mqtt.exe
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/v')
+      with:
+        files: D:\a\logitech-unfiy-mqtt\logitech-unfiy-mqtt\x64\Release\logitech-unify-mqtt.exe
