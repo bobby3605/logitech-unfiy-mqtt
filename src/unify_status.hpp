@@ -5,6 +5,7 @@
 #include <chrono>
 #include <fstream>
 #include <windows.h>
+#include "unify_mqtt.hpp"
 
 enum DeviceStatus {
 	CONNECTED,
@@ -18,8 +19,6 @@ struct DeviceData {
 	std::string name = "";
 	std::chrono::steady_clock::time_point last_connected_packet_time;
 };
-
-
 
 class UnifyStatus {
 	struct HIDDevicePath {
@@ -46,8 +45,7 @@ class UnifyStatus {
 	// Size of wireless device connection status notification
 	const unsigned int notification_byte_size = 7;
 
-	std::string mqtt_ip;
-	std::string mqtt_port;
+	std::string mqtt_address;
 	std::string mqtt_username;
 	std::string mqtt_password;
 	std::string mqtt_prefix;
@@ -65,6 +63,8 @@ class UnifyStatus {
 	void process_device_status(unsigned int device_id);
 	void print_bytes(std::vector<unsigned char> const& bytes);
 	bool check_response(HANDLE usb, std::vector<unsigned char> const& bytes_to_check, std::vector<unsigned char>& response);
+
+	UnifyMQTT* _mqtt;
 
 public:
 	UnifyStatus();

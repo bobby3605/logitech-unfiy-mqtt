@@ -7,10 +7,11 @@
 #include <hidsdi.h>
 #include <setupapi.h>
 #include <lmcons.h>
+#include "common.hpp"
 
 void UnifyStatus::print_bytes(std::vector<unsigned char> const& bytes) {
 	for (const auto& byte : bytes) {
-		debug_log << std::hex << (int)byte << " ";
+		debug_log << curr_time() << std::hex << (int)byte << " ";
 	}
 }
 bool UnifyStatus::check_response(HANDLE usb, std::vector<unsigned char> const& bytes_to_check, std::vector<unsigned char>& response) {
@@ -40,7 +41,7 @@ std::string UnifyStatus::find_hid_path(LPGUID hid_guid, HIDDevicePath path_to_fi
 		PSP_DEVICE_INTERFACE_DETAIL_DATA_A device_detail_data = (PSP_DEVICE_INTERFACE_DETAIL_DATA_A)malloc(required_size);
 		// check for null malloc
 		if (device_detail_data == NULL) {
-			debug_log << "null malloc" << std::endl;
+			debug_log << curr_time() << "null malloc" << std::endl;
 			exit(1);
 		}
 		else {
@@ -79,7 +80,7 @@ void UnifyStatus::find_and_wait_on_receiver() {
 		// check for receiver every second
 		// debug log runs if either path check fails
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		debug_log << "waiting on receiver" << std::endl;
+		debug_log << curr_time() << "waiting on receiver" << std::endl;
 	}
 }
 
@@ -100,17 +101,17 @@ void UnifyStatus::enable_wireless_notifications() {
 	// Read and check success response from receiver
 	const std::vector<unsigned char> enable_notifications_success = {0x10, 0xff, 0x80, 0x00};
 	if (!check_response(receiver, enable_notifications_success, response_buffer)) {
-		debug_log << "warning: failed to confirm enabled notifications: ";
+		debug_log << curr_time() << "warning: failed to confirm enabled notifications: ";
 		print_bytes(response_buffer);
-		debug_log << std::endl;
+		debug_log << curr_time() << std::endl;
 	}
 	// For some reason, the HID driver sends a notification read command as well,
 	// and so this driver needs to wait for the notification read response
 	const std::vector<unsigned char> notification_read_success = {0x10, 0xff, 0x81, 0x00};
 	if (!check_response(receiver, notification_read_success, response_buffer)) {
-		debug_log << "warning: failed to confirm notification read after enable: ";
+		debug_log << curr_time() << "warning: failed to confirm notification read after enable: ";
 		print_bytes(response_buffer);
-		debug_log << std::endl;
+		debug_log << curr_time() << std::endl;
 	}
 }
 
@@ -129,9 +130,9 @@ void UnifyStatus::get_paired_devices() {
 		}
 	}
 	else {
-		debug_log << "warning: failed to get paired devices: ";
+		debug_log << curr_time() << "warning: failed to get paired devices: ";
 		print_bytes(response_buffer);
-		debug_log << std::endl;
+		debug_log << curr_time() << std::endl;
 	}
 }
 
@@ -142,15 +143,15 @@ std::string UnifyStatus::get_device_name(unsigned int device_id){
 	unsigned char correct_id = device_id | 0x40;
 	const std::vector<unsigned char> get_name_cmd = {0x10, 0xff, 0x83, 0xb5, correct_id, 0x00, 0x00};
 	write_usb(receiver, get_name_cmd);
-	// For some reason, when the device is connected,
+	// For some reason, after the device sends a connected message,
 	// the receiver sends an undocumented packet before sending the name
 	if (devices_info[device_id].status == CONNECTED) {
 		const std::vector<unsigned char> undocumented_response_check = { 0x11, 0x01, 0x04 };
 		std::vector<unsigned char> undocumented_response(20);
 		if (!check_response(responder, undocumented_response_check, undocumented_response)) {
-			debug_log << "warning: failed to read undocumented response: ";
+			debug_log << curr_time() << "warning: failed to read undocumented response: ";
 			print_bytes(undocumented_response);
-			debug_log << std::endl;
+			debug_log << curr_time() << std::endl;
 		}
 	}
 	std::vector<unsigned char> name_response_buffer(20);
@@ -162,9 +163,9 @@ std::string UnifyStatus::get_device_name(unsigned int device_id){
 		return name;
 	}
 	else {
-		debug_log << "warning: failed to find name for device: " << (unsigned int)device_id << " bytes: ";
+		debug_log << curr_time() << "warning: failed to find name for device: " << (unsigned int)device_id << " bytes: ";
 		print_bytes(name_response_buffer);
-		debug_log << std::endl;
+		debug_log << curr_time() << std::endl;
 		return "";
 	}
 }
@@ -238,7 +239,7 @@ void UnifyStatus::read_notifications() {
 			DWORD error = GetLastError();
 			// not connected and aborted are handled error cases
 			if (!(error == ERROR_DEVICE_NOT_CONNECTED || error == ERROR_OPERATION_ABORTED)) {
-				debug_log << "failed to read receiver with error: " << GetLastError() << std::endl;
+				debug_log << curr_time() << "failed to read receiver with error: " << GetLastError() << std::endl;
 			}
 			break;
 		}
@@ -248,7 +249,7 @@ void UnifyStatus::read_notifications() {
 }
 
 void UnifyStatus::process_device_status(unsigned int device_id){
-	debug_log << device_id << ": " << devices_info[device_id].name << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
+	_mqtt->publish(devices_info[device_id].name, status_to_string.at(devices_info[device_id].status), debug_log);
 }
 
 void UnifyStatus::run() {
@@ -272,18 +273,15 @@ UnifyStatus::UnifyStatus() {
 		std::string log_path = appdata_path + "\\debug.log";
 		HANDLE config_file = CreateFileA(config_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		if (GetLastError() != ERROR_ALREADY_EXISTS) {
-			WritePrivateProfileStringA("MQTT", "ip", "", config_path.c_str());
-			WritePrivateProfileStringA("MQTT", "port", "1883", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "address", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "username", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "password", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "prefix","homeassistant/", config_path.c_str());
 		}
 		CloseHandle(config_file);
 		std::vector<char> config_buffer(64);
-		GetPrivateProfileStringA("MQTT","ip",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		mqtt_ip = std::string(reinterpret_cast<char*>(config_buffer.data()));
-		GetPrivateProfileStringA("MQTT","port","1883", config_buffer.data(), config_buffer.capacity(), config_path.c_str());
-		mqtt_port = std::string(reinterpret_cast<char*>(config_buffer.data()));
+		GetPrivateProfileStringA("MQTT","address",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		mqtt_address = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","username",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
 		mqtt_username = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","password",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
@@ -295,8 +293,10 @@ UnifyStatus::UnifyStatus() {
 	else {
 		std::cout << "failed to create appdata path" << std::endl;
 	}
+	_mqtt = new UnifyMQTT(mqtt_address, mqtt_username, mqtt_password, debug_log);
 }
 
 UnifyStatus::~UnifyStatus() {
 	debug_log.close();
+	delete _mqtt;
 }

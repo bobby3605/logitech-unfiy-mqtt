@@ -1,0 +1,6 @@
+{
+  "builtin-baseline": "edb4f4d8c73aac48b5ba2dba5dc630625d5d2774",
+  "dependencies": [
+    "paho-mqtt"
+  ]
+}

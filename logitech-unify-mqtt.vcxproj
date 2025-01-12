@@ -73,6 +73,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -132,7 +135,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\common.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\unify_mqtt.cpp" />
     <ClCompile Include="src\unify_status.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -141,7 +146,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <ClInclude Include="src\common.hpp" />
     <ClInclude Include="src\main.hpp" />
+    <ClInclude Include="src\unify_mqtt.hpp" />
     <ClInclude Include="src\unify_status.hpp" />
   </ItemGroup>
   <ItemGroup>
