@@ -63,6 +63,7 @@ class UnifyStatus {
 	void process_device_status(unsigned int device_id);
 	void print_bytes(std::vector<unsigned char> const& bytes);
 	bool check_response(HANDLE usb, std::vector<unsigned char> const& bytes_to_check, std::vector<unsigned char>& response);
+	void update_mqtt_discovery();
 
 	UnifyMQTT* _mqtt;
 

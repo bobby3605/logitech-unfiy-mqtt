@@ -8,6 +8,8 @@
 #include <setupapi.h>
 #include <lmcons.h>
 #include "common.hpp"
+#include "../external/json.hpp"
+using json = nlohmann::json;
 
 void UnifyStatus::print_bytes(std::vector<unsigned char> const& bytes) {
 	for (const auto& byte : bytes) {
@@ -125,8 +127,6 @@ void UnifyStatus::get_paired_devices() {
 		devices_info.resize(paired_devices_count);
 		for (int i = 0; i < paired_devices_count; ++i) {
 			devices_info[i].name = get_device_name(i);
-			std::replace(devices_info[i].name.begin(), devices_info[i].name.end(), ' ', '_');
-			devices_info[i].name = mqtt_prefix + devices_info[i].name;
 		}
 	}
 	else {
@@ -170,6 +170,30 @@ std::string UnifyStatus::get_device_name(unsigned int device_id){
 	}
 }
 
+void UnifyStatus::update_mqtt_discovery() {
+	json payload;
+	payload["dev"] = { {"ids", "logitech-unify-mqtt"}, {"name", "Logitech Unify Receiver"}};
+	payload["o"] = { {"name", "logitech-unify-mqtt"}, {"url", "https://github.com/bobby3605/logitech-unfiy-mqtt"}};
+	payload["qos"] = 0;
+	payload["cmps"] = json::object();
+	for (int i = 0; i < devices_info.size(); ++i) {
+		std::string dev = "dev" + std::to_string(i);
+		payload["cmps"][dev] = {
+			{ "p", "sensor" },
+			{ "state_topic", mqtt_prefix + dev + "/power_state" },
+			{ "unique_id", dev},
+			{ "name", devices_info[i].name}
+		};
+	}
+	std::string topic = mqtt_prefix + "config";
+	_mqtt->publish(topic, payload.dump(), debug_log);
+}
+
+void UnifyStatus::process_device_status(unsigned int device_id){
+	std::string topic = mqtt_prefix + "dev" + std::to_string(device_id) + "/power_state";
+	_mqtt->publish(topic, status_to_string.at(devices_info[device_id].status), debug_log);
+	debug_log << "sent: " << topic << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
+}
 
 void UnifyStatus::read_notifications() {
 	receiver = CreateFileA(unify_primary_path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -177,6 +201,7 @@ void UnifyStatus::read_notifications() {
 	enable_wireless_notifications();
 	std::vector<unsigned char> tmp(1);
 	get_paired_devices();
+	update_mqtt_discovery();
 	std::vector<unsigned char> read_buffer(notification_byte_size);
 	DWORD bytes_read;
 	// set the start time to 0 to ensure that a first connection isn't an erroneous powersave
@@ -197,6 +222,7 @@ void UnifyStatus::read_notifications() {
 					// devices are 1 indexed on the receiver,
 					if (read_buffer[1] > devices_info.size()) {
 						devices_info.resize(read_buffer[1]);
+						update_mqtt_discovery();
 					}
 					// convert the device id to be 0 indexed
 					unsigned int device_id = read_buffer[1] - 1;
@@ -207,8 +233,6 @@ void UnifyStatus::read_notifications() {
 						device_info->status = CONNECTED;
 						if (device_info->name == "") {
 							device_info->name = get_device_name(device_id);
-							std::replace(device_info->name.begin(), device_info->name.end(), ' ', '_');
-							device_info->name = mqtt_prefix + device_info->name;
 						}
 					}
 					// 0x61 is device disconnection
@@ -248,10 +272,6 @@ void UnifyStatus::read_notifications() {
 	CloseHandle(responder);
 }
 
-void UnifyStatus::process_device_status(unsigned int device_id){
-	_mqtt->publish(devices_info[device_id].name, status_to_string.at(devices_info[device_id].status), debug_log);
-}
-
 void UnifyStatus::run() {
 	// Run the driver
 	// Keep looping indefinitely,
@@ -276,7 +296,7 @@ UnifyStatus::UnifyStatus() {
 			WritePrivateProfileStringA("MQTT", "address", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "username", "", config_path.c_str());
 			WritePrivateProfileStringA("MQTT", "password", "", config_path.c_str());
-			WritePrivateProfileStringA("MQTT", "prefix","homeassistant/", config_path.c_str());
+			WritePrivateProfileStringA("MQTT", "discovery-prefix","homeassistant", config_path.c_str());
 		}
 		CloseHandle(config_file);
 		std::vector<char> config_buffer(64);
@@ -286,8 +306,9 @@ UnifyStatus::UnifyStatus() {
 		mqtt_username = std::string(reinterpret_cast<char*>(config_buffer.data()));
 		GetPrivateProfileStringA("MQTT","password",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
 		mqtt_password = std::string(reinterpret_cast<char*>(config_buffer.data()));
-		GetPrivateProfileStringA("MQTT","prefix",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
+		GetPrivateProfileStringA("MQTT","discovery-prefix",NULL,config_buffer.data(), config_buffer.capacity(), config_path.c_str());
 		mqtt_prefix = std::string(reinterpret_cast<char*>(config_buffer.data()));
+		mqtt_prefix += "/device/logitech-unify-mqtt/";
 		debug_log.open(log_path, std::ios::app);
 	}
 	else {

@@ -6,12 +6,10 @@ UnifyMQTT::UnifyMQTT(const std::string& address, const std::string& username, co
 	if (rc != MQTTCLIENT_SUCCESS) {
 		debug_log << curr_time() << "Failed to create MQTT client: " << rc << std::endl;
 	}
-	else {
-		debug_log << curr_time() << "MQTT client created: " << rc << std::endl;
-	}
 	MQTTClient_connectOptions options = MQTTClient_connectOptions_initializer;
 	options.username = username.c_str();
 	options.password = password.c_str();
+	options.keepAliveInterval = 60;
 	rc = MQTTClient_connect(_client, &options);
 	if (rc != MQTTCLIENT_SUCCESS) {
 		debug_log << curr_time() << "Failed to connect to MQTT server: " << rc << std::endl;
