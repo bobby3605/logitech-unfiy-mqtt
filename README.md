@@ -14,6 +14,22 @@ The status is shown in a task tray icon by right clicking on it.\
 There are 'Reload' and 'Exit' options on the popup menu.\
 The config file and debug logs are stored in C:\Users\username\AppData\Local\logitech-unify-mqtt\
 
+### Running and Configuration:
+Download and run the latest executable from the releases tab.
+
+A config file will be auto generated the first time the program runs.\
+Once it has been generated, edit it to your own setup,\
+then right click on the task tray icon and click the 'Reload' button.
+
+```C:\Users\username\AppData\Local\logitech-unify-mqtt\config.ini```
+```
+[MQTT]
+address=mqtt://IP_ADDRESS:1883
+username=mqtt_username
+password=mqtt_password
+discovery-prefix=homeassistant
+```
+
 ### TODO:
 MQTT ssl
 
