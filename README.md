@@ -15,7 +15,7 @@ There are 'Reload' and 'Exit' options on the popup menu.\
 The config file and debug logs are stored in C:\Users\username\AppData\Local\logitech-unify-mqtt\
 
 ### TODO:
-MQTT integration
+MQTT ssl
 
 ### Known limitations:
 When the driver starts, if a device is connected, it will display as disconnected.\
