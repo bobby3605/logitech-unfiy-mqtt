@@ -1,5 +1,5 @@
 {
-  "builtin-baseline": "401edd4e93917851f003f88c0fed03d20eba47bc",
+  "builtin-baseline": "c82f74667287d3dc386bce81e44964370c91a289",
   "dependencies": [
     "paho-mqtt"
   ]
