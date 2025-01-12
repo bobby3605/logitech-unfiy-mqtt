@@ -23,3 +23,5 @@ The driver can get the name of the device at the start, but it will show as disc
 So whenever the driver is started/reloaded, devices will have to be disconnected and re-connected to the receiver in order to get the correct status.\
 The receiver does not have a command (at least not a documented one) that will give the connected/disconnected status of a device.\
 The receiver only sends connection status information when the device connects or disconnects.
+
+The keepalive for MQTT is set to 0 since the paho library doesn't seem to be sending keepalive packets on its own (might be a bug)
