@@ -186,13 +186,12 @@ void UnifyStatus::update_mqtt_discovery() {
 		};
 	}
 	std::string topic = mqtt_prefix + "config";
-	_mqtt->publish(topic, payload.dump(), debug_log);
+	_mqtt->publish(topic, payload.dump(), true, debug_log);
 }
 
 void UnifyStatus::process_device_status(unsigned int device_id){
 	std::string topic = mqtt_prefix + "dev" + std::to_string(device_id) + "/power_state";
-	_mqtt->publish(topic, status_to_string.at(devices_info[device_id].status), debug_log);
-	debug_log << "sent: " << topic << ": " << status_to_string.at(devices_info[device_id].status) << std::endl;
+	_mqtt->publish(topic, status_to_string.at(devices_info[device_id].status), false, debug_log);
 }
 
 void UnifyStatus::read_notifications() {
